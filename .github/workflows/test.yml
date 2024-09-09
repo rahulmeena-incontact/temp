@@ -1,0 +1,88 @@
+name: Cleanup Workflow
+
+on:
+  workflow_dispatch:  # Allows manual triggers
+  push:
+    branches:
+      - main
+
+env:
+  AWS_DEFAULT_REGION: 'us-west-2'
+
+jobs:
+  cloudformation_cleanup:
+    name: CloudFormation Cleanup
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: CloudFormation Cleanup
+        run: aws cloudformation delete-stack --stack-name DO${{ github.event.inputs.cluster }}
+
+      - name: Clean Workspace
+        run: rm -rf *
+
+  active_directory_cleanup:
+    name: Active Directory Cleanup
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Run AD Cleanup Script
+        run: .\\jenkins\\doterm\\ad.ps1
+        shell: powershell
+
+  dns_cleanup:
+    name: DNS Cleanup
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Run DNS Cleanup Script
+        run: .\\jenkins\\doterm\\dns.ps1
+        shell: powershell
+
+  webadmins_cleanup:
+    name: WebAdmins Cleanup
+    runs-on: ubuntu-latest
+    env:
+      RDCREDS_USR: ${{ secrets.RDCREDS_USR }}
+      RDCREDS_PSW: ${{ secrets.RDCREDS_PSW }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Run WebAdmins Cleanup Script
+        run: |
+          chmod +x ./jenkins/DOTerm/wam.sh
+          ./jenkins/DOTerm/wam.sh ${{ github.event.inputs.cluster }} ${{ secrets.RDCREDS_USR }} ${{ secrets.RDCREDS_PSW }}
+
+      - name: Clean Workspace
+        run: rm -rf *
+
+  chef_cleanup:
+    name: Chef Cleanup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Chef
+        run: |
+          mkdir -p ./.chef/
+          cp ./jenkins/DOTerm/knife.rb ./.chef/knife.rb
+          knife ssl fetch
+
+      - name: Bulk Delete Chef Nodes
+        run: |
+          knife node bulk delete "^doa-c${{ github.event.inputs.cluster }}.*" --yes || echo "Node Already Gone"
+        continue-on-error: true
+
+      - name: Bulk Delete Chef Clients
+        run: |
+          knife client bulk delete "^doa-c${{ github.event.inputs.cluster }}.*" --yes || echo "Client Already Gone"
+        continue-on-error: true
+
